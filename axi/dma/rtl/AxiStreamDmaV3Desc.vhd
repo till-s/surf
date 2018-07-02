@@ -37,9 +37,37 @@ entity AxiStreamDmaV3Desc is
       AXI_CONFIG_G      : AxiConfigType         := AXI_CONFIG_INIT_C;
       DESC_AWIDTH_G     : integer range 4 to 12 := 12;               -- Descriptor Address width
       DESC_ARB_G        : boolean               := true;
+      DESC_VERSION_G    : integer range 1 to 2  := 1;                -- If descriptor version is 1, descriptor size is 64 bits
+                                                                     -- else 128 bits if the version is 2
       ACK_WAIT_BVALID_G : boolean               := true);            -- Wait ack valid
-
-
-
-
+   port(
+      -- Clock/Reset
+      axiClk          : in  sl;
+      axiRst          : in  sl;
+      -- Local AXI Lite Bus
+      axilReadMaster  : in  AxiLiteReadMasterType;
+      axilReadSlave   : out AxiLiteReadSlaveType;
+      axilWriteMaster : in  AxiLiteWriteMasterType;
+      axilWriteSlave  : out AxiLiteWriteSlaveType;
+      -- Additional signals
+      interrupt       : out sl;
+      online          : out slv (CHAN_COUNT_G-1 downto 0);
+      acknowledge     : out slv (CHAN_COUNT_G-1 downto 0);
+      -- DMA write descriptor request, ack and return
+      dmaWrDescReq    : in  AxiWriteDmaDescReqArray(CHAN_COUNT_G-1 downto 0);
+      dmaWrDescAck    : out AxiWriteDmaDescAckArray(CHAN_COUNT_G-1 downto 0);
+      dmaWrDescRet    : in  AxiWriteDmaDescRetArray(CHAN_COUNT_G-1 downto 0);
+      dmaWrDescRetAck : out slv(CHAN_COUNT_G-1 downto 0);
+      -- DMA read descriptor request, ack and return
+      dmaRdDescReq    : out AxiReadDmaDescReqArray
+      dmaRdDescAck    : in  slv(CHAN_COUNT_G-1 downto 0);
+      dmaRdDescRet    : in  AxiReadDmaDescRetArray(CHAN_COUNT_G-1 downto 0);
+      dmaRdDescRetAck : out slv(CHAN_COUNT_G-1 downto 0);
+      -- Config
+      axiRdCache      : out slv(3 downto 0);
+      axiWrCache      : out slv(3 downto 0);
+      -- AXI Interface
+      axiWriteMaster  : out AxiWriteMasterType;
+      axiWriteSlave   : in  AxiWriteSlaveType;
+      axiWriteCtrl    : in  AxiCtrlType := AXI_CTRL_UNUSED_C);
 end AxiStreamDmaV3Desc;
