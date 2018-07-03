@@ -71,3 +71,32 @@ entity AxiStreamDmaV3Desc is
       axiWriteSlave   : in  AxiWriteSlaveType;
       axiWriteCtrl    : in  AxiCtrlType := AXI_CTRL_UNUSED_C);
 end AxiStreamDmaV3Desc;
+
+architecture rtl of AxiStreamDmaV3Desc is
+
+   constant CROSSBAR_CONN_C : slv(15 downto 0) := x"FFFF"; -- 16 bit Crossbar connection
+
+   constant CB_COUNT_C : integer := 2;                     -- Crossbar count
+
+   constant LOC_INDEX_C       : natural            := 0;                                        -- Local index
+   constant LOC_BASE_ADDR_C   : slv(31 downto 0)   := AXIL_BASE_ADDR_G(31 downto 16) & x"0000"; -- Local Base Address
+   constant LOC_NUM_BITS_C    : natural            := 14;                                       -- Local number of bits
+
+   constant ADDR_INDEX_C      : natural            := 0;
+   constant ADDR_BASE_ADDR_C  : slv(31 downto 0)   := AXIL_BASE_ADDR_G(31 downto 16) & x"4000";
+   constant ADDR_NUM_BITS_C   : natural            := 14;
+   
+   constant AXI_CROSSBAR_MASTERS_CONFIG_C : AxiLiteCrossbarMasterConfigArray(CB_COUNT_C-1 downto 0) := (
+      LOC_INDEX_C       => (
+         baseAddr       => LOC_BASE_ADDR_C,
+         addrBits       => LOC_NUM_BITS_C,
+         connectivity   => CROSSBAR_CONN_C),
+      ADDR_INDEX_C      => (
+         baseAddr       => ADDR_BASE_ADDR_C,
+         addrBits       => ADDR_NUM_BITS_C,
+         connectivity   => CROSSBAR_CONN_C));
+
+   signal intReadMasters   : AxiLiteReadMasterArray(CB_COUNT_C-1 downto 0);
+   signal intReadSlaves    : AxiLiteReadSlaveArray(CB_COUNT_C-1 downto 0);
+   signal intWriteMasters  : AxiLiteWriteMasterArray(CB_COUNT_C-1 downto 0);
+   signal intWriteSlaves   : AxiLiteWriteSlaveArray(CB_COUNT_C-1 downto 0);
