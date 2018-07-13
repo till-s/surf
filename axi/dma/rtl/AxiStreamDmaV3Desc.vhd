@@ -27,11 +27,12 @@ use work.AxiPkg.all;
 use work.AxiLitePkg.all;
 use work.AxiDmaPkg.all;
 use work.ArbiterPkg.all;
+use work.AxiPciePkg.all;
 
 entity AxiStreamDmaV3Desc is
    generic (
       TPD_G             : time                  := 1 ns;             -- Propagation Delay
-      CHAN_COUNT_G        : integer range 1 to 16 := 1;              -- Channel count
+      CHAN_COUNT_G      : integer range 1 to 16 := 1;                -- Channel count
       AXIL_BASE_ADDR_G  : slv(31 downto 0)      := x"00000000";      -- Axi Lite Base Address
       AXI_READY_EN_G    : boolean               := false;            -- Axi ready signal
       AXI_CONFIG_G      : AxiConfigType         := AXI_CONFIG_INIT_C;
@@ -39,7 +40,7 @@ entity AxiStreamDmaV3Desc is
       DESC_ARB_G        : boolean               := true;
       DESC_VERSION_G    : integer range 1 to 2  := 1;                -- If descriptor version is 1, descriptor size is 64 bits
                                                                      -- else 128 bits if the version is 2
-      ACK_WAIT_BVALID_G : boolean               := true);            -- Wait ack valid
+       ACK_WAIT_BVALID_G : boolean               := true);           -- Wait ack valid
    port(
       -- Clock/Reset
       axiClk          : in  sl;
@@ -256,6 +257,15 @@ architecture rtl of AxiStreamDmaV3Desc is
    -- attribute dont_touch of invalidCount : signal is "true";
    -- attribute dont_touch of diffCnt      : signal is "true";
 begin
+   -----------------------------------------
+   -- Axi Descriptor Dma Config
+   -----------------------------------------
+   U_AxiDescDmaConfig : entity work.DMA_AXI_CONFIG_C
+      generic map(
+         ADDR_WIDTH_C   => DESC_AWIDTH_G,
+         DATA_BYTES_C   => 16,
+         ID_BITS_C      => 5,
+         LEN_BITS_C     => 8);
 
    -----------------------------------------
    -- Crossbar
@@ -655,13 +665,13 @@ begin
             v.axiWriteMaster.wstrb := resize(x"FF", 128);
 
             -- Descriptor data
-            v.axiWriteMaster.wdata(63 downto 56) := dmaWrDescRet(descIndex).dest;
-            v.axiWriteMaster.wdata(55 downto 32) := dmaWrDescRet(descIndex).size(23 downto 0);
-            v.axiWriteMaster.wdata(31 downto 24) := dmaWrDescRet(descIndex).firstUser;
-            v.axiWriteMaster.wdata(23 downto 16) := dmaWrDescRet(descIndex).lastUser;
-            v.axiWriteMaster.wdata(15 downto 4)  := dmaWrDescRet(descIndex).buffId(11 downto 0);
-            v.axiWriteMaster.wdata(3)            := dmaWrDescRet(descIndex).continue;
-            v.axiWriteMaster.wdata(2 downto 0)   := dmaWrDescRet(descIndex).result;
+            v.axiWriteMaster.wdata(63 downto 56) := dmaWrDescRet(descIndex).dest;                -- Bits 63-56 - Write Destination address
+            v.axiWriteMaster.wdata(55 downto 32) := dmaWrDescRet(descIndex).size(23 downto 0);   -- Bits 55-32 - Descriptor data size = 24 bits
+            v.axiWriteMaster.wdata(31 downto 24) := dmaWrDescRet(descIndex).firstUser;           -- Bits 31-24 - First user data
+            v.axiWriteMaster.wdata(23 downto 16) := dmaWrDescRet(descIndex).lastUser;            -- Bits 23-16 - Last user data
+            v.axiWriteMaster.wdata(15 downto 4)  := dmaWrDescRet(descIndex).buffId(11 downto 0); -- Bits 15-4  - 12 bit buffer ID
+            v.axiWriteMaster.wdata(3)            := dmaWrDescRet(descIndex).continue;            -- Bit 3      - Continue signal
+            v.axiWriteMaster.wdata(2 downto 0)   := dmaWrDescRet(descIndex).result;              -- Bits 2-0   - Result
 
             -- Encoded channel into upper destination bits
             if CHAN_COUNT_G > 1 then
@@ -694,9 +704,9 @@ begin
             -- Descriptor data
             v.axiWriteMaster.wdata(63 downto 32) := x"00000001";
             v.axiWriteMaster.wdata(31 downto 16) := (others => '0');
-            v.axiWriteMaster.wdata(15 downto 4)  := dmaRdDescRet(descIndex).buffId(11 downto 0);
+            v.axiWriteMaster.wdata(15 downto 4)  := dmaRdDescRet(descIndex).buffId(11 downto 0); -- Dma read desc buffer id
             v.axiWriteMaster.wdata(3)            := '0';
-            v.axiWriteMaster.wdata(2 downto 0)   := dmaRdDescRet(descIndex).result;
+            v.axiWriteMaster.wdata(2 downto 0)   := dmaRdDescRet(descIndex).result; -- Dma read desc index
 
             v.axiWriteMaster.awvalid := '1';
             v.axiWriteMaster.wvalid  := '1';
