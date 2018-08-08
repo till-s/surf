@@ -2,7 +2,7 @@
 -- File       : SrpV3Core.vhd
 -- Company    : SLAC National Accelerator Laboratory
 -- Created    : 2016-03-22
--- Last update: 2016-11-07
+-- Last update: 2018-08-08
 -------------------------------------------------------------------------------
 -- Description: SLAC Register Protocol Version 3, AXI-Lite Interface
 --
@@ -487,6 +487,8 @@ begin
                v.srpRdSlave.tReady := '1';
                v.txMaster.tValid   := '1';
 
+               v.timeoutCnt := (others => '0');
+
                -- Zero out data segments where tkeep not set
                -- There must be a more elegant way to do this
                for i in 3 downto 0 loop
@@ -522,7 +524,7 @@ begin
                -- Check 100 ms timer
                if r.timer = TIMEOUT_C then
                   -- Increment counter
-                  v.timeoutCnt := r.timeoutCnt + 1;
+                  v.timeoutCnt := v.timeoutCnt + 1;
                   -- Check the counter
                   if v.timeoutCnt = r.timeoutSize then
                      -- Set the flags
@@ -539,6 +541,8 @@ begin
             if (rxMaster.tValid = '1') and (v.txMaster.tValid = '0') and (v.srpWrMaster.tValid = '0')then
                -- Accept the data
                v.rxSlave.tReady := '1';
+
+               v.timeoutCnt := (others => '0');
 
                -- Echo the write data back, but not if posted write
                v.txMaster.tValid             := toSl(r.srpReq.opCode /= SRP_POSTED_WRITE_C);
@@ -578,7 +582,7 @@ begin
                -- Check 100 ms timer
                if r.timer = TIMEOUT_C then
                   -- Increment counter
-                  v.timeoutCnt := r.timeoutCnt + 1;
+                  v.timeoutCnt := v.timeoutCnt + 1;
                   -- Check the counter
                   if v.timeoutCnt = r.timeoutSize then
                      -- Set the flags
