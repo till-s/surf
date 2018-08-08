@@ -183,7 +183,7 @@ package AxiDmaPkg is
       dropEn     : sl;              
       maxSize    : slv(31 downto 0);
       contEn     : sl;              
-      buffId     : slv(15 downto 0);
+      buffId     : slv(31 downto 0);
    end record;
 
    constant AXI_WRITE_DMA_DESC_ACK_INIT_C : AxiWriteDmaDescAckType := ( 
