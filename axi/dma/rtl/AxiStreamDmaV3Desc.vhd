@@ -131,7 +131,7 @@ architecture rtl of AxiStreamDmaV3Desc is
       buffBaseAddr : slv(63 downto 32);            -- For buffer entries - 32 bit buffer base address
       wrBaseAddr   : slv(63 downto 0);             -- For write ring buffer - 64 bit write base address
       rdBaseAddr   : slv(63 downto 0);             -- For read ring buffer - 64 bit read base address
-      maxSize      : slv(23 downto 0);             -- 24 bit Max buffer size
+      maxSize      : slv(31 downto 0);             -- 31 bit Max buffer size
       contEn       : sl;                           -- Container enable?
       dropEn       : sl;
       enable       : sl;
@@ -240,7 +240,7 @@ architecture rtl of AxiStreamDmaV3Desc is
    signal rin          : RegType;                       -- RegType rin signal
    signal pause        : sl;
    signal rdFifoValid  : slv(1 downto 0);               -- Read Fifo valid
-   signal rdFifoDout   : slv(63 downto 0);              -- Read Fifo output
+   signal rdFifoDout   : slv(127 downto 0);             -- Read Fifo output - Changed to 128 bits
    signal wrFifoValid  : sl;                            -- Write Fifo Valid
    signal wrFifoDout   : slv(15 downto 0);              -- Write Fifo output
    signal addrRamDout  : slv(31 downto 0);              -- Ram address output
@@ -295,9 +295,9 @@ begin
    U_DescFifo : entity work.Fifo
       generic map (
          TPD_G           => TPD_G,
-         GEN_SYNC_FIFO_G => true,
-         FWFT_EN_G       => true,
-         DATA_WIDTH_G    => 16,
+         GEN_SYNC_FIFO_G => true,            -- Synchronous FIFO
+         FWFT_EN_G       => true,            -- First word fall through = TRUE
+         DATA_WIDTH_G    => 16,              -- Data width = 16 bits.
          ADDR_WIDTH_G    => DESC_AWIDTH_G)
       port map (
          rst    => r.fifoReset,
@@ -548,7 +548,7 @@ begin
                   -- Increment the counter
                   v.wrReqCnt := r.wrReqCnt + 1;
                end if;
-               -- Check for valid 
+               -- Check for valid
                if (wrReqList(r.wrReqCnt) = '1') then
                   v.wrReqValid := '1';
                   v.wrReqNum   := toSlv(r.wrReqCnt, CHAN_SIZE_C);
@@ -570,7 +570,7 @@ begin
             v.dmaWrDescAck(i).address              := r.buffBaseAddr & r.wrAddr;
             v.dmaWrDescAck(i).dropEn               := r.dropEn;
             v.dmaWrDescAck(i).contEn               := r.contEn;
-            v.dmaWrDescAck(i).buffId(11 downto 0)  := wrFifoDout(11 downto 0);
+            v.dmaWrDescAck(i).buffId(15 downto 0)  := wrFifoDout(15 downto 0);
             v.dmaWrDescAck(i).maxSize(23 downto 0) := r.maxSize;
          end loop;
 
@@ -630,7 +630,7 @@ begin
                      -- Increment the counter
                      v.descRetCnt := r.descRetCnt + 1;
                   end if;
-                  -- Check for valid 
+                  -- Check for valid
                   if (v.descRetList(r.descRetCnt) = '1') then
                      descRetValid := '1';
                      v.descRetNum := toSlv(r.descRetCnt, DESC_SIZE_C);
@@ -718,8 +718,8 @@ begin
             -- Descriptor data
             v.axiWriteMaster.wdata(127 downto 64) := x"0000000000000001";
             v.axiWriteMaster.wdata(63 downto 32)  := dmaRdDescRet(descIndex).buffId; -- Dma read desc buffer id
-            v.axiWriteMaster.wdata(31 downto 4)   := (others => '0');
-            v.axiWriteMaster.wdata(3)             := '0';
+            v.axiWriteMaster.wdata(31 downto 3)   := (others => '0');
+--            v.axiWriteMaster.wdata(3)             := '0';
             v.axiWriteMaster.wdata(2 downto 0)    := dmaRdDescRet(descIndex).result; -- Dma read desc index
 
             v.axiWriteMaster.awvalid := '1';
@@ -741,11 +741,11 @@ begin
             v.descState := IDLE_S;
 
       end case;
-      
+
       -- Copy the lowest 64-bit word to the entire bus (refer to  "section 9.3 Narrow transfers" of the AMBA spec)
       for i in 15 downto 1 loop
          v.axiWriteMaster.wdata((64*i)+63 downto (64*i)) := v.axiWriteMaster.wdata(63 downto 0);
-      end loop;      
+      end loop;
 
       -- Drive interrupt, avoid false firings during ack
       if r.intReqCount /= 0 and r.intSwAckReq = '0' then
@@ -797,11 +797,11 @@ begin
       dmaRdReq                     := AXI_READ_DMA_DESC_REQ_INIT_C;
       dmaRdReq.valid               := r.rdAddrValid;
       dmaRdReq.address             := r.buffBaseAddr & r.rdAddr;
-      dmaRdReq.dest                := rdFifoDout(63 downto 56);
-      dmaRdReq.size(23 downto 0)   := rdFifoDout(55 downto 32);
-      dmaRdReq.firstUser           := rdFifoDout(31 downto 24);
-      dmaRdReq.lastUser            := rdFifoDout(23 downto 16);
-      dmaRdReq.buffId(11 downto 0) := rdFifoDout(15 downto 4);
+      dmaRdReq.dest                := rdFifoDout(127 downto 112);
+      dmaRdReq.size(31 downto 0)   := rdFifoDout(111 downto 80);
+      dmaRdReq.firstUser           := rdFifoDout(79 downto 72);
+      dmaRdReq.lastUser            := rdFifoDout(71 downto 64);
+      dmaRdReq.buffId(31 downto 0) := rdFifoDout(63 downto 32);
       dmaRdReq.continue            := rdFifoDout(3);
 
       -- Upper dest bits select channel
@@ -824,15 +824,15 @@ begin
          v.rdIndex := (others => '0');
       end if;
 
-      -- Reset      
+      -- Reset
       if (axiRst = '1') then
          v := REG_INIT_C;
       end if;
 
-      -- Register the variable for next clock cycle      
+      -- Register the variable for next clock cycle
       rin <= v;
 
-      -- Outputs   
+      -- Outputs
       intReadSlaves(LOC_INDEX_C)  <= r.axilReadSlave;
       intWriteSlaves(LOC_INDEX_C) <= r.axilWriteSlave;
 

@@ -73,7 +73,7 @@ package AxiDmaPkg is
       errorValue : slv(1 downto 0);
       firstUser  : slv(7 downto 0);
       lastUser   : slv(7 downto 0);
-      dest       : slv(7 downto 0);
+      dest       : slv(15 downto 0);
       id         : slv(7 downto 0);
    end record;
 
@@ -209,13 +209,13 @@ package AxiDmaPkg is
 
    type AxiWriteDmaDescRetType is record
       valid      : sl;
-      buffId     : slv(15 downto 0); 
+      buffId     : slv(31 downto 0); 
       firstUser  : slv(7  downto 0);
       lastUser   : slv(7  downto 0);
       size       : slv(31 downto 0);
       continue   : sl;
       result     : slv(2  downto 0);
-      dest       : slv(7  downto 0);
+      dest       : slv(15 downto 0);
       id         : slv(7  downto 0);
    end record;
 
@@ -253,7 +253,7 @@ package AxiDmaPkg is
       contEn     : sl;
       dropEn     : sl;
       id         : slv(7  downto 0);
-      buffId     : slv(15 downto 0);
+      buffId     : slv(31 downto 0);
       overflow   : sl;
    end record;
 
@@ -286,13 +286,13 @@ package AxiDmaPkg is
    type AxiReadDmaDescReqType is record
       valid      : sl;
       address    : slv(63 downto 0);
-      buffId     : slv(15 downto 0); 
+      buffId     : slv(31 downto 0); 
       firstUser  : slv(7  downto 0);
       lastUser   : slv(7  downto 0);
       size       : slv(31 downto 0);
       continue   : sl;
       id         : slv(7  downto 0);
-      dest       : slv(7  downto 0);
+      dest       : slv(31  downto 0);
    end record;
 
    constant AXI_READ_DMA_DESC_REQ_INIT_C : AxiReadDmaDescReqType := ( 
@@ -321,7 +321,7 @@ package AxiDmaPkg is
 
    type AxiReadDmaDescRetType is record
       valid      : sl;
-      buffId     : slv(15 downto 0); 
+      buffId     : slv(31 downto 0); 
       result     : slv(2  downto 0);
    end record;
 
