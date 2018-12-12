@@ -76,6 +76,7 @@ entity AxiStreamDmaV2Desc is
       dmaRdDescRet    : in  AxiReadDmaDescRetArray(CHAN_COUNT_G-1 downto 0);
       dmaRdDescRetAck : out slv(CHAN_COUNT_G-1 downto 0);
       -- Config
+      dmaEnable       : out sl;
       axiRdCache      : out slv(3 downto 0);
       axiWrCache      : out slv(3 downto 0);
       -- AXI Interface
@@ -929,6 +930,7 @@ begin
       intReadSlaves(LOC_INDEX_C)  <= r.axilReadSlave;
       intWriteSlaves(LOC_INDEX_C) <= r.axilWriteSlave;
 
+      dmaEnable       <= r.enable;
       online          <= r.online;
       interrupt       <= r.interrupt;
       acknowledge     <= r.acknowledge;

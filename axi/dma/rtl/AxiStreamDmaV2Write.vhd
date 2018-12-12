@@ -44,6 +44,7 @@ entity AxiStreamDmaV2Write is
       dmaWrDescRet    : out AxiWriteDmaDescRetType;
       dmaWrDescRetAck : in  sl;
       -- Config and status
+      dmaEnable       : in  sl;
       dmaWrIdle       : out sl;
       axiCache        : in  slv(3 downto 0);
       -- Streaming Interface 
@@ -141,7 +142,7 @@ begin
    pause <= '0' when (AXI_READY_EN_G) else axiWriteCtrl.pause;
 
    -- State machine
-   comb : process (axiRst, axiWriteSlave, dmaWrDescAck, dmaWrDescRetAck, 
+   comb : process (axiRst, dmaEnable, axiWriteSlave, dmaWrDescAck, dmaWrDescRetAck, 
                    intAxisMaster, trackData, pause, r, axiCache) is
       variable v       : RegType;
       variable bytes   : natural;
@@ -465,7 +466,7 @@ begin
       intAxisSlave <= v.slave;
 
       -- Reset      
-      if (axiRst = '1') then
+      if (axiRst = '1' or dmaEnable = '0') then
          v := REG_INIT_C;
       end if;
 

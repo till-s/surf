@@ -82,8 +82,10 @@ architecture structure of AxiStreamDmaV2 is
 
    signal axiRdCache : slv(3 downto 0);
    signal axiWrCache : slv(3 downto 0);
+   signal dmaEnable  : sl;
 
    signal axiReset  : slv(CHAN_COUNT_G-1 downto 0);
+
 
    attribute dont_touch             : string;
    attribute dont_touch of axiReset : signal is "true";   
@@ -111,6 +113,7 @@ begin
             axilWriteSlave  => axilWriteSlave,
             interrupt       => interrupt,
             online          => online,
+            dmaEnable       => dmaEnable,
             acknowledge     => acknowledge,
             dmaWrDescReq    => dmaWrDescReq,
             dmaWrDescAck    => dmaWrDescAck,
@@ -148,6 +151,7 @@ begin
             axilWriteSlave  => axilWriteSlave,
             interrupt       => interrupt,
             online          => online,
+            dmaEnable       => dmaEnable,
             acknowledge     => acknowledge,
             dmaWrDescReq    => dmaWrDescReq,
             dmaWrDescAck    => dmaWrDescAck,
@@ -221,6 +225,7 @@ begin
             dmaWrDescRet    => dmaWrDescRet(i),
             dmaWrDescRetAck => dmaWrDescRetAck(i),
             dmaWrIdle       => open,
+            dmaEnable       => dmaEnable,
             axiCache        => axiWrCache,
             axisMaster      => sAxisMaster(i),
             axisSlave       => sAxisSlave(i),

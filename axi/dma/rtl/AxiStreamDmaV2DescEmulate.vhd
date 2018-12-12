@@ -61,6 +61,7 @@ entity AxiStreamDmaV2DescEmulate is
       dmaRdDescRet    : in  AxiReadDmaDescRetArray(CHAN_COUNT_G-1 downto 0);
       dmaRdDescRetAck : out slv(CHAN_COUNT_G-1 downto 0);
       -- Config
+      dmaEnable       : out sl;
       axiRdCache      : out slv(3 downto 0)              := AXI_CACHE_G;
       axiWrCache      : out slv(3 downto 0)              := AXI_CACHE_G;
       -- AXI Interface
@@ -99,6 +100,7 @@ begin
    axilWriteSlave <= AXI_LITE_WRITE_SLAVE_EMPTY_OK_C;
    interrupt      <= '0';
    online         <= (others => '0');
+   dmaEnable      <= '1';
    acknowledge    <= (others => '0');
    axiWriteMaster <= AXI_WRITE_MASTER_INIT_C;
 
