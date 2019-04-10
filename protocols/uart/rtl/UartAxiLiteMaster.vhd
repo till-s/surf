@@ -2,8 +2,9 @@
 -- File       : UartAxiLiteMaster.vhd
 -- Company    : SLAC National Accelerator Laboratory
 -------------------------------------------------------------------------------
--- Description: Ties together everything needed for a full duplex UART.
--- This includes Baud Rate Generator, Transmitter, Receiver and FIFOs.
+-- Description: 
+-- Implementation of a UART register access protocol
+-- Converts ASCII UART messages into AXI-Lite bus accesses
 -------------------------------------------------------------------------------
 -- This file is part of 'SLAC Firmware Standard Library'.
 -- It is subject to the license terms in the LICENSE.txt file found in the 
@@ -26,14 +27,13 @@ use work.AxiLitePkg.all;
 entity UartAxiLiteMaster is
 
    generic (
-      TPD_G             : time                  := 1 ns;
-      AXIL_CLK_FREQ_G   : real                  := 125.0e6;
-      BAUD_RATE_G       : integer               := 115200;
-      STOP_BITS_G       : integer range 1 to 2  := 1;
-      PARITY_G          : string                := "NONE";  -- "NONE" "ODD" "EVEN"
-      DATA_WIDTH_G      : integer range 5 to 8  := 8;
-      FIFO_BRAM_EN_G    : boolean               := false;
-      FIFO_ADDR_WIDTH_G : integer range 4 to 48 := 5);
+      TPD_G                  : time                  := 1 ns;
+      AXIL_CLK_FREQ_G        : real                  := 125.0e6;
+      UART_BAUD_RATE_G       : integer               := 115200;
+      UART_STOP_BITS_G       : integer range 1 to 2  := 1;
+      UART_PARITY_G          : string                := "NONE";  -- "NONE" "ODD" "EVEN"
+      UART_FIFO_BRAM_EN_G    : boolean               := false;
+      UART_FIFO_ADDR_WIDTH_G : integer range 4 to 48 := 5);
    port (
       axilClk          : in  sl;
       axilRst          : in  sl;
@@ -50,32 +50,35 @@ end entity UartAxiLiteMaster;
 
 architecture rtl of UartAxiLiteMaster is
 
-   type StateType is (
-      WAIT_START_S,
-      SPACE_ADDR_S,
-      ADDR_SPACE_S,
-      WR_DATA_S,
-      WAIT_EOL_S,
-      AXIL_TXN_S,
-      RD_DATA_SPACE_S,
-      RD_DATA_S,
-      DONE_S);
+   -- SRPv3 Constants
+   constant SRP_VERSION_C      : slv(7 downto 0) := x"03";
+   constant NON_POSTED_READ_C  : slv(1 downto 0) := "00";
+   constant NON_POSTED_WRITE_C : slv(1 downto 0) := "01";
+   constant POSTED_WRITE_C     : slv(1 downto 0) := "10";
+   constant NULL_C             : slv(1 downto 0) := "11";
+
+   constant AXIS_CONFIG_C : AxiStreamConfigType := ssiAxiStreamConfig(4);
+
+   type CmdStateType is (
+      WAIT_START_S);
+
+   type RspStateType is (
+      WAIT_START_S);
 
    type RegType is record
-      state       : StateType;
-      count       : slv(2 downto 0);
-      axilReq     : AxiLiteReqType;
-      rdData      : slv(31 downto 0);
+      cmdState    : CmdStateType;
+      cmdOpCode : slv(1 downto 0);
+      uartRxReady : sl;
+      sAxisMaster : AxiStreamMasterType;
+
+      rspState    : RspStateType;
       uartTxData  : slv(7 downto 0);
       uartTxValid : sl;
-      uartRxReady : sl;
+      mAxisSlave  : AxiStreamSlaveType;
    end record RegType;
 
    constant REG_INIT_C : RegType := (
-      state       => WAIT_START_S,
-      count       => (others => '0'),
-      axilReq     => AXI_LITE_REQ_INIT_C,
-      rdData      => (others => '0'),
+      cmdOpCode => NULL_C;
       uartTxData  => (others => '0'),
       uartTxValid => '0',
       uartRxReady => '1');
@@ -83,25 +86,19 @@ architecture rtl of UartAxiLiteMaster is
    signal r   : RegType := REG_INIT_C;
    signal rin : RegType;
 
---   signal axilReq : AxiLiteReqType;
-   signal axilAck : AxiLiteAckType;
-
    signal uartRxData  : slv(7 downto 0);
    signal uartRxValid : sl;
---   signal uartRxReady : sl;
+   signal sAxisSlave  : AxiStreamSlaveType;
 
---    signal uartTxData  : slv(7 downto 0);
---    signal uartTxValid : sl;
    signal uartTxReady : sl;
+   signal mAxisMaster : AxiStreamMasterType;
 
    -- translate a hex character 0-9 A-F into an slv
    function hexToSlv (hex : slv(7 downto 0)) return slv is
       variable char : character;
    begin
       char := character'val(conv_integer(hex));
-
       return toSlv(int(char), 4);
-
    end function;
 
    function slvToHex (nibble : slv(3 downto 0)) return slv is
@@ -121,7 +118,7 @@ begin
          BAUD_RATE_G       => BAUD_RATE_G,
          STOP_BITS_G       => STOP_BITS_G,
          PARITY_G          => PARITY_G,
-         DATA_WIDTH_G      => DATA_WIDTH_G,
+         DATA_WIDTH_G      => 8,
          FIFO_BRAM_EN_G    => FIFO_BRAM_EN_G,
          FIFO_ADDR_WIDTH_G => FIFO_ADDR_WIDTH_G)
       port map (
@@ -132,22 +129,37 @@ begin
          wrReady => uartTxReady,        -- [out]
          rdData  => uartRxData,         -- [out]
          rdValid => uartRxValid,        -- [out]
-         rdReady => r.uartRxReady,      -- [in]
+         rdReady => rin.uartRxReady,    -- [in]
          tx      => tx,                 -- [out]
          rx      => rx);                -- [in]
 
-   U_AxiLiteMaster_1 : entity work.AxiLiteMaster
+   -------------------------------------------------------------------------------------------------
+   -- SRPv3
+   -- UART messages are converted into SRPv3 frames and this SRPv3 module does the heavy lifting
+   -------------------------------------------------------------------------------------------------
+   U_SrpV3AxiLite_1 : entity work.SrpV3AxiLite
       generic map (
-         TPD_G => TPD_G)
+         TPD_G               => TPD_G,
+         SLAVE_READY_EN_G    => true,
+         GEN_SYNC_FIFO_G     => true,
+         AXIL_CLK_FREQ_G     => AXIL_CLK_FREQ_G,
+         AXI_STREAM_CONFIG_G => ssiAxiStreamConfig(4))
       port map (
-         axilClk         => axilClk,           -- [in]
-         axilRst         => axilRst,           -- [in]
-         req             => r.axilReq,         -- [in]
-         ack             => axilAck,           -- [out]
-         axilWriteMaster => mAxilWriteMaster,  -- [out]
-         axilWriteSlave  => mAxilWriteSlave,   -- [in]
-         axilReadMaster  => mAxilReadMaster,   -- [out]
-         axilReadSlave   => mAxilReadSlave);   -- [in]
+         sAxisClk         => axilClk,           -- [in]
+         sAxisRst         => axilRst,           -- [in]
+         sAxisMaster      => r.sAxisMaster,     -- [in]
+         sAxisSlave       => sAxisSlave,        -- [out]
+--         sAxisCtrl        => sAxisCtrl,         -- [out]
+         mAxisClk         => axilClk,           -- [in]
+         mAxisRst         => axilRst,           -- [in]
+         mAxisMaster      => mAxisMaster,       -- [out]
+         mAxisSlave       => rin.mAxisSlave,    -- [in]
+         axilClk          => axilClk,           -- [in]
+         axilRst          => axilRst,           -- [in]
+         mAxilWriteMaster => mAxilWriteMaster,  -- [out]
+         mAxilWriteSlave  => mAxilWriteSlave,   -- [in]
+         mAxilReadMaster  => mAxilReadMaster,   -- [out]
+         mAxilReadSlave   => mAxilReadSlave);   -- [in]
 
    comb : process (axilAck, axilRst, r, uartRxData, uartRxValid, uartTxReady) is
       variable v : RegType;
@@ -178,136 +190,110 @@ begin
       v := r;
 
       -- Format:
-      -- "w|W ADDRHEX DATAHEX0 [DATAHEX1] [DATAHEX2]...\r|\n"
+      -- "w|W IDHEX ADDRHEX DATAHEX0 [DATAHEX1] [DATAHEX2]...\r|\n"
       -- Writes echo'd back with resp code
-      -- "r|R ADDRHEX [NUMREADSHEX] \r|\n"
+      -- "r|R IDHEX ADDRHEX [NUMREADSHEX] \r|\n"
       -- Resp: "r|R ADDRHEX DATAHEX0 [DATAHEX1] [DATAHEX2]...\r|\n"
       -- Blank lines ignored
       -- Extra words ignored.
 
-      -- Auto clear uartTxValid upton uartTxReady
+      -- Auto clear flow control signals
       if (uartTxReady = '1') then
          v.uartTxValid := '0';
       end if;
 
-      case r.state is
-         when WAIT_START_S =>
-            -- Any characters before 'r' or 'w' are thrown out
-            if (uartRxValid = '1') then
+      if (sAxisSlave.tReady = '1') then
+         v.sAxisMaster.tValid := '0';
+      end if;
+
+      v.uartTxReady       := '0';
+      v.mAxisSlave.tReady := '0';
+
+      case r.cmdState is
+         when CLEAR_S =>
+            v.cmdOpCode := NULL_C;
+            v.cmdId := (others => '0');
+            v.cmdAddr := (others => '0');
+            v.cmdData := (others => '0');
+            
+         when WAIT_OPCODE_S =>
+            -- Any characters before 'r', 'w' or 'p' are thrown out
+            v.sAxisMaster.tData := (others => '0');
+            v.sAxisMaster.tData(7 downto 0) := SRP_VERSION_C;
+            
+            if (uartRxValid = '1' and v.sAxisMaster.tValid = '0') then
+               v.uartRxReady := '1';
+               -- Write
                if (uartRxData = toSlv(character'pos('w'), 8) or
                    uartRxData = toSlv(character'pos('W'), 8)) then
-                  -- Write op
-                  v.axilReq.rnw := '0';
-                  uartTx(uartRxData);
-                  v.state       := SPACE_ADDR_S;
+                  v.cmdOpCode := NON_POSTED_WRITE_C;
+
+               --Read
                elsif (uartRxData = toSlv(character'pos('r'), 8) or
                       uartRxData = toSlv(character'pos('R'), 8)) then
-                  -- Read
-                  v.axilReq.rnw := '1';
-                  uartTx(uartRxData);
-                  v.state       := SPACE_ADDR_S;
+                  v.cmdOpCode := NON_POSTED_READ_C;
+
+               -- Posted write
+               elsif (uartRxData = toSlv(character'pos('p'), 8) or
+                      uartRxData = toSlv(character'pos('P'), 8)) then
+                  v.cmdOpCode := POSTED_WRITE_C;
                end if;
+
+               -- Send the first txn when a space is seen
+               v.sAxisMaster.tData(9 downto 8) := v.cmdOpCode;               
+               if (isSpace(uartRxData) and r.cmdOpCode != NULL_C) then
+                  ssiSetUserSof(AXIS_CONFIG_C, v.sAxisMaster, '1');
+                  v.sAxisMaster.tValid := '1';
+                  v.cmdState := ID_S;
+               end if;
+
             end if;
 
-         when SPACE_ADDR_S =>
-            -- Need to check for the space after opcode
-            if (uartRxValid = '1') then
-               uartTx(uartRxData);
-               v.state           := ADDR_SPACE_S;
-               v.axilReq.address := r.axilReq.address(27 downto 0) & hexToSlv(uartRxData);
+         when ID_S =>
+            if (uartRxValid = '1' v.sAxisMaster.tValid = '0') then
+               v.uartRxReady := '1';
+               v.cmdId := r.cmdId(27 downto 0) & hexToSlv(uartRxData);
 
-               -- Ignore character if its a space
+               -- Send the ID txn when a space is seen
                if (isSpace(uartRxData)) then
-                  v.axilReq.address := r.axilReq.address;
+                  v.cmdId := r.cmdId;
+                  v.sAxisMaster.tData(31 downto 0) := r.cmdId;
+                  v.sAxisMaster.tValid := '1';
+                  v.cmdState := ADDR0_S;
                end if;
 
                -- Go back to start if EOL
                if (isEOL(uartRxData)) then
-                  v.state := WAIT_START_S;
+                  v.cmdState := TERMINATE_S;
                end if;
             end if;
 
+         when ADDR0_S =>
+            if (uartRxValid = '1' v.sAxisMaster.tValid = '0') then
+               v.uartRxReady := '1';
+               v.cmdAddr := r.cmdAddr(27 downto 0) & hexToSlv(uartRxData);
 
-         when ADDR_SPACE_S =>
-            if (uartRxValid = '1') then
-               uartTx(uartRxData);
-               v.axilReq.address := r.axilReq.address(27 downto 0) & hexToSlv(uartRxData);
-
-               -- Space indicates end of addr word
+               -- Send the ID txn when a space is seen
                if (isSpace(uartRxData)) then
-                  v.axilReq.address := r.axilReq.address;
-                  if (r.axilReq.rnw = '0') then
-                     v.state := WR_DATA_S;
-                  else
-                     v.state := WAIT_EOL_S;
-                  end if;
+                  v.cmdAddr := r.cmdAddr;
+                  v.sAxisMaster.tData(31 downto 0) := r.cmdAddr;
+                  v.sAxisMaster.tValid := '1';
+                  v.cmdState := ADDR1_S;
                end if;
 
-               -- Go back to start if EOL and write op
-               -- Else do the read op
+               -- Go back to start if EOL
                if (isEOL(uartRxData)) then
-                  if (r.axilReq.rnw = '0') then
-                     v.state := WAIT_START_S;
-                  else
-                     v.axilReq.address := r.axilReq.address;
-                     uartTx(' ');
-                     v.state           := AXIL_TXN_S;
-                  end if;
-               end if;
-
-            end if;
-
-         when WR_DATA_S =>
-            if (uartRxValid = '1') then
-               uartTx(uartRxData);
-               v.axilReq.wrData := r.axilReq.wrData(27 downto 0) & hexToSlv(uartRxData);
-
-               -- Space or EOL indicates end of wrData word
-               -- If space need to wait for EOL
-               if (isSpace(uartRxData)) then
-                  v.axilReq.wrData := r.axilReq.wrData;
-                  v.state          := WAIT_EOL_S;
-               end if;
-
-               -- If EOL can issue AXIL txn
-               if (isEOL(uartRxData)) then
-                  v.axilReq.wrData := r.axilReq.wrData;
-                  uartTx(' ');
-                  v.state          := AXIL_TXN_S;
+                  v.cmdState := TERMINATE_S;
                end if;
             end if;
-
-         when WAIT_EOL_S =>
-            -- Issue AXIL TXN once EOL seen
-            -- Any other charachters are echo'd but otherwise ignored
-            if (uartRxValid = '1') then
-               uartTx(uartRxData);
-               if (isEOL(uartRxData)) then
-                  uartTx(' ');
-                  v.state := AXIL_TXN_S;
-               end if;
+            
+         when ADDR1_S =>
+            v.sAxisMaster.tData(31 downto 0) := (others => '0');            
+            if (v.sAxisMaster.tValid = '0') then
+               v.sAxisMaster.tValid := '1';
+               v.cmdState := 
             end if;
-
-         when AXIL_TXN_S =>
-            -- Transmit a space on first cycle of this state
-            if (r.axilReq.request = '0' and r.axilReq.rnw = '0') then
-               uartTx(' ');
-            end if;
-
-            -- Assert request and wait for response
-            v.axilReq.request := '1';
-            if (axilAck.done = '1') then
-
-               -- Done if write op, else transmit the read data
-               if (r.axilReq.rnw = '0') then
-                  v.state := DONE_S;
-               else
-                  --uartTx(' ');
-                  v.rdData := axilAck.rdData;
-                  v.state  := RD_DATA_S;
-               end if;
-            end if;
-
+            
 
          when RD_DATA_S =>
             v.count  := r.count + 1;
